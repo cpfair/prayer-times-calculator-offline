@@ -1,0 +1,14 @@
+[tool.pdm]
+
+[project]
+name = "prayer_times_calculator_offline"
+version = "1.0.1"
+description = "Prayer Times Calculator - Offline"
+readme = "README.MD"
+authors = [
+    {name = "cpfair, Umair Chagani", email = "cpf@cpfx.ca"},
+]
+license = {text = "MIT"}
+
+[project.urls]
+Homepage = "https://github.com/cfair/prayer-times-calculator-offline"
