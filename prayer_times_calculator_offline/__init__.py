@@ -1,6 +1,6 @@
 """Initialize api."""
 
-from .pray_times_calculator import PrayerTimesCalculator
+from .interop import PrayerTimesCalculator
 from .exceptions import CalculationMethodError, InvalidResponseError
 
 __all__ = [

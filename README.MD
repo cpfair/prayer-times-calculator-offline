@@ -1,122 +1,23 @@
-# Prayer Times Calculator
+# Prayer Times Calculator - Offline
 
-Just a python package around [https://aladhan.com's](https://aladhan.com/prayer-times-api) API. Only tested on python3.
+Not designed as a general purpose prayer time library. This is meant as a cloud-free, drop-in replacement for [`prayer-times-calculator`](https://github.com/uchagani/prayer-times-calculator), which in turn is used by the [Islamic Prayer Times HomeAssistant integration](https://www.home-assistant.io/integrations/islamic_prayer_times/).
+
+
+Equivalence to the `prayer-times-calculator` library was checked by emperical comparison of 50,000 requests (each with randomized parameters). The original intention was to replicate the output exactly, however please note the following exceptions where `prayer-times-calculator-offline` will return a different result than `prayer-times-calculator` for the same call:
+
+* Asr calculation is stable; at time of writing, AlAdhan's API uses the [API server's local time](https://github.com/islamic-network/prayer-times/blob/f7ed3a2467fbced252a0914c8b202c8b61ca58b9/src/PrayerTimes/PrayerTimes.php#L538) as part of the Asr calculation, causing the returned time to drift as the server's day progresses.
+* ISO8601 date components are correct; at time of writing, AlAdhan's API sometime returns ISO8601 timestamps with correct times but incorrect dates.
+  * E.g. [this API call](https://api.aladhan.com/v1/timings/28-06-2042?latitude=78.76131061889032&longitude=72.35356426766558&method=21&iso8601=true&school=1&midnightMode=1&latitudeAdjustmentMethod=3&tune=1%2C3%2C-1%2C5%2C4%2C4%2C-2%2C-2%2C1) where all timestamps are returned with the same date component, making Isha appear to happen before Maghrib and Fajr appear to happen after Sunrise
+* Portugal Maghrib tuning applied correctly; At time of writing, AlAdhan's API maps the [Asr tuning value to Maghrib](https://github.com/islamic-network/api.aladhan.com/blob/f3d57f7c7b54f5bb9592efdb984fbbea41093f82/api/Utils/PrayerTimesHelper.php#L306)
+* Local time output (`iso8601=False`) is not supported, as it is not required for use in HomeAssistant (which deals only with UTC internally)
+<!-- * No `date` field returned, as it is not required for use in HomeAssistant at present (NB the Makkah calculation method's Ramadan adjustment still occurs) -->
+* 'None' is supported as a high-latitude adjustment method
+* Angles of 0 are supported for the "custom" calculation method; at time of writing, AlAdhan's API silently ignores such angles and uses a different default angle in their place.
+* Floating point computations take place on your CPU, which may vary from the AlAdhan API server's CPU; there may be 1-minute differences if these computational variations span a rounding break. Hijri date calculation may also be affected, including the 30-minute Isha offset during Ramadan when using the Makkah calculation method.
+
+
+*The remainder of this README is based on that from prayer-times-calculator.*
 
 ## Usage
 
-```python
-from prayer_times_calculator import PrayerTimesCalculator
-
-# required parameters
-lat = 41.881832
-long = -87.623177
-calc_method = 'isna'
-date = "2018-11-27"
-# optional parameters
-school = "shafi"
-midnightMode = "jafari"
-latitudeAdjustmentMethod = "one seventh"
-# If tune = True, then you can tune the timings by adding the tune parameter
-# (denoting addition / substraction in minutes)
-# Please NOTE that tuning one prayer will not change another.
-# So adding 3 mins to Maghrib will NOT automatically add 3 mins to Isha
-tune = False
-imsak_tune = 0
-fajr_tune = 0
-sunrise_tune = 0
-dhuhr_tune = 0
-asr_tune = 0
-maghrib_tune = 0
-sunset_tune = 0
-isha_tune = 0
-midnight_tune = 0
-# If calc_method="custom", then you can override some of these variables
-fajr_angle = 15
-maghrib_angle = None
-isha_angle = 15
-
-calc = PrayerTimesCalculator(
-    latitude=lat,
-    longitude=long,
-    calculation_method=calc_method,
-    date=date,
-    school=school,
-    midnightMode=midnightMode,
-    latitudeAdjustmentMethod=latitudeAdjustmentMethod,
-    tune=tune,
-    imsak_tune=imsak_tune,
-    fajr_tune=fajr_tune,
-    sunrise_tune=sunrise_tune,
-    dhuhr_tune=dhuhr_tune,
-    asr_tune=asr_tune,
-    maghrib_tune=maghrib_tune,
-    sunset_tune=sunset_tune,
-    isha_tune=isha_tune,
-    fajr_angle=fajr_angle,
-    maghrib_angle=maghrib_angle,
-    isha_angle=isha_angle,
-    iso8601=False
-)
-
-times = calc.fetch_prayer_times()
-```
-
-the `fetch_prayer_times` method will return a dict similar to:
-
-```python
-{'Fajr': '05:31',
- 'Sunrise': '06:53',
- 'Dhuhr': '11:38',
- 'Asr': '14:03',
- 'Sunset': '16:22',
- 'Maghrib': '16:22',
- 'Isha': '17:44',
- 'Imsak': '05:21',
- 'Midnight': '22:57',
- 'date': {'readable': '26 Nov 2018',
-  'timestamp': '1543276800',
-  'hijri': {'date': '17-03-1440',
-   'format': 'DD-MM-YYYY',
-   'day': '17',
-   'weekday': {'en': 'Al Athnayn', 'ar': 'الاثنين'},
-   'month': {'number': 3, 'en': 'Rabīʿ al-awwal', 'ar': 'رَبيع الأوّل'},
-   'year': '1440',
-   'designation': {'abbreviated': 'AH', 'expanded': 'Anno Hegirae'},
-   'holidays': []},
-  'gregorian': {'date': '26-11-2018',
-   'format': 'DD-MM-YYYY',
-   'day': '26',
-   'weekday': {'en': 'Monday'},
-   'month': {'number': 11, 'en': 'November'},
-   'year': '2018',
-   'designation': {'abbreviated': 'AD', 'expanded': 'Anno Domini'}}}}
-```
-In case `iso8601` is set to True the returned dict will be similar to:
-
-```python
-{'Fajr': '2018-11-26T05:31:00+03:00',
- 'Sunrise': '2018-11-26T06:53:00+03:00',
- 'Dhuhr': '2018-11-26T11:38:00+03:00',
- 'Asr': '2018-11-26T14:03:00+03:00',
- 'Sunset': '2018-11-26T16:22:00+03:00',
- 'Maghrib': '2018-11-26T16:22:00+03:00',
- 'Isha': '2018-11-26T17:44:00+03:00',
- 'Imsak': '2018-11-26T05:21:00+03:00',
- 'Midnight': '2018-11-26T22:57:00+03:00',
- 'date': {'readable': '26 Nov 2018',
-  'timestamp': '1543276800',
-  'hijri': {'date': '17-03-1440',
-   'format': 'DD-MM-YYYY',
-   'day': '17',
-   'weekday': {'en': 'Al Athnayn', 'ar': 'الاثنين'},
-   'month': {'number': 3, 'en': 'Rabīʿ al-awwal', 'ar': 'رَبيع الأوّل'},
-   'year': '1440',
-   'designation': {'abbreviated': 'AH', 'expanded': 'Anno Hegirae'},
-   'holidays': []},
-  'gregorian': {'date': '26-11-2018',
-   'format': 'DD-MM-YYYY',
-   'day': '26',
-   'weekday': {'en': 'Monday'},
-   'month': {'number': 11, 'en': 'November'},
-   'year': '2018',
-   'designation': {'abbreviated': 'AD', 'expanded': 'Anno Domini'}}}}
+Please refer to the [usage section of `prayer-times-calculator`](https://github.com/uchagani/prayer-times-calculator?tab=readme-ov-file#usage).

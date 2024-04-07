@@ -1,6 +1,17 @@
 #!/usr/bin/env python
+# type: ignore
+
+# NB this is a modified version of the official 2.3 release, with the following changes:
+# - Fix incorrect Isha offset computation
+# - Improve behaviour for otherwise "invalid" time computations (clampedCos)
+# - Add Moonsighting.com shafaq adjustments
+# - Remove preset calculation methods
+# - Fix offsets/offset typo
+# - Example code removed
+
 # compatible with python 2.x and 3.x
 
+import datetime
 import math
 import re
 
@@ -40,11 +51,9 @@ http://praytimes.org/calculation
 
     getTimes (date, coordinates, timeZone [, dst [, timeFormat]])
 
-    setMethod (method)       // set calculation method
     adjust (parameters)      // adjust calculation parameters
     tune (offsets)           // tune times by given offsets
 
-    getMethod ()             // get calculation method
     getSetting ()            // get current calculation parameters
     getOffsets ()            // get current time offsets
 
@@ -67,58 +76,31 @@ class PrayTimes():
 
     # Time Names
     timeNames = {
-        'imsak'    : 'Imsak',
-        'fajr'     : 'Fajr',
-        'sunrise'  : 'Sunrise',
-        'dhuhr'    : 'Dhuhr',
-        'asr'      : 'Asr',
-        'sunset'   : 'Sunset',
-        'maghrib'  : 'Maghrib',
-        'isha'     : 'Isha',
-        'midnight' : 'Midnight'
+        'imsak'      : 'Imsak',
+        'fajr'       : 'Fajr',
+        'sunrise'    : 'Sunrise',
+        'dhuhr'      : 'Dhuhr',
+        'asr'        : 'Asr',
+        'sunset'     : 'Sunset',
+        'maghrib'    : 'Maghrib',
+        'isha'       : 'Isha',
+        'midnight'   : 'Midnight',
+        'firstthird' : 'First Third of Night',
+        'lastthird'  : 'Last Third of Night'
     }
-
-    # Calculation Methods
-    methods = {
-        'MWL': {
-            'name': 'Muslim World League',
-            'params': { 'fajr': 18, 'isha': 17 } },
-        'ISNA': {
-            'name': 'Islamic Society of North America (ISNA)',
-            'params': { 'fajr': 15, 'isha': 15 } },
-        'Egypt': {
-            'name': 'Egyptian General Authority of Survey',
-            'params': { 'fajr': 19.5, 'isha': 17.5 } },
-        'Makkah': {
-            'name': 'Umm Al-Qura University, Makkah',
-            'params': { 'fajr': 18.5, 'isha': '90 min' } },  # fajr was 19 degrees before 1430 hijri
-        'Karachi': {
-            'name': 'University of Islamic Sciences, Karachi',
-            'params': { 'fajr': 18, 'isha': 18 } },
-        'Tehran': {
-            'name': 'Institute of Geophysics, University of Tehran',
-            'params': { 'fajr': 17.7, 'isha': 14, 'maghrib': 4.5, 'midnight': 'Jafari' } },  # isha is not explicitly specified in this method
-        'Jafari': {
-            'name': 'Shia Ithna-Ashari, Leva Institute, Qum',
-            'params': { 'fajr': 16, 'isha': 14, 'maghrib': 4, 'midnight': 'Jafari' } }
-    }
-
-    # Default Parameters in Calculation Methods
-    defaultParams = {
-        'maghrib': '0 min', 'midnight': 'Standard'
-    }
-
 
     #---------------------- Default Settings --------------------
-
-    calcMethod = 'MWL'
 
     # do not change anything here; use adjust method instead
     settings = {
         "imsak"    : '10 min',
+        'fajr'     : '0 min',
         "dhuhr"    : '0 min',
         "asr"      : 'Standard',
-        "highLats" : 'NightMiddle'
+        'maghrib'  : '0 min',
+        'isha'     : '0',
+        "highLats" : 'NightMiddle',
+        'midnight' : 'Standard'
     }
 
     timeFormat = '24h'
@@ -126,54 +108,33 @@ class PrayTimes():
     invalidTime =  '-----'
 
     numIterations = 1
-    offset = {}
 
 
     #---------------------- Initialization -----------------------
 
-    def __init__(self, method = "MWL") :
+    def __init__(self) :
 
-        # set methods defaults
-        for method, config in self.methods.items():
-            for name, value in self.defaultParams.items():
-                if not name in config['params'] or config['params'][name] is None:
-                    config['params'][name] = value
-
-        # initialize settings
-        self.calcMethod = method if method in self.methods else 'MWL'
-        params = self.methods[self.calcMethod]['params']
-        for name, value in params.items():
-            self.settings[name] = value
+        self.settings = dict(PrayTimes.settings)
 
         # init time offsets
+        self.offset = {}
         for name in self.timeNames:
             self.offset[name] = 0
 
 
     #-------------------- Interface Functions --------------------
 
-    def setMethod(self, method):
-        if method in self.methods:
-            self.adjust(self.methods[method].params)
-            self.calcMethod = method
-
     def adjust(self, params):
         self.settings.update(params)
 
     def tune(self, timeOffsets):
-        self.offsets.update(timeOffsets)
-
-    def getMethod(self):
-        return self.calcMethod
+        self.offset.update(timeOffsets)
 
     def getSettings(self):
         return self.settings
 
     def getOffsets(self):
         return self.offset
-
-    def getDefaults(self):
-        return self.methods
 
     # return prayer times for a given date
     def getTimes(self, date, coords, timezone, dst = 0, format = None):
@@ -184,6 +145,7 @@ class PrayTimes():
             self.timeFormat = format
         if type(date).__name__ == 'date':
             date = (date.year, date.month, date.day)
+        self._date = datetime.date(*date)
         self.timeZone = timezone + (1 if dst else 0)
         self.jDate = self.julian(date[0], date[1], date[2]) - self.lng / (15 * 24.0)
         return self.computeTimes()
@@ -215,14 +177,12 @@ class PrayTimes():
 
     # compute the time at which sun reaches a specific angle below horizon
     def sunAngleTime(self, angle, time, direction = None):
-        try:
-            decl = self.sunPosition(self.jDate + time)[0]
-            noon = self.midDay(time)
-            t = 1/15.0* self.arccos((-self.sin(angle)- self.sin(decl)* self.sin(self.lat))/
-                    (self.cos(decl)* self.cos(self.lat)))
-            return noon+ (-t if direction == 'ccw' else t)
-        except ValueError:
-            return float('nan')
+        decl = self.sunPosition(self.jDate + time)[0]
+        noon = self.midDay(time)
+        clampedCos = (-self.sin(angle)- self.sin(decl)* self.sin(self.lat))/(self.cos(decl)* self.cos(self.lat))
+        clampedCos = min(1, max(-1, clampedCos))
+        t = 1/15.0 * self.arccos(clampedCos)
+        return noon+ (-t if direction == 'ccw' else t)
 
     # compute asr time
     def asrTime(self, factor, time):
@@ -279,6 +239,61 @@ class PrayTimes():
             'asr': asr, 'sunset': sunset, 'maghrib': maghrib, 'isha': isha
         }
 
+    def computeMoonsightingDotComAdjustment(self, a, b, c, d):
+        if self.lat > 0:
+            deltaBase = datetime.date(self._date.year, 12, 21)
+        else:
+            deltaBase = datetime.date(self._date.year, 6, 21)
+        dyy = (self._date - deltaBase).total_seconds() / (60 * 60 * 24)
+        if dyy < 0:
+            dyy += 365
+
+        if dyy < 91:
+            res = a + (b - a) / 91 * dyy
+        elif dyy < 137:
+            res = b + (c - b) / 46 * ( dyy - 91 )
+        elif dyy < 183:
+            res = c + (d - c) / 46 * ( dyy - 137 )
+        elif dyy < 229:
+            res = d + (c - d) / 46 * ( dyy - 183 )
+        elif dyy < 275:
+            res = c + (b - c) / 46 * ( dyy - 229 )
+        else:
+            res = b + (a - b) / 91 * ( dyy - 275 )
+        return int(round(res))
+
+    def computeMoonsightingDotComFajrAdjustment(self):
+        return self.computeMoonsightingDotComAdjustment(
+            a=75 + 28.65 / 55 * abs(self.lat),
+            b=75 + 19.44 / 55 * abs(self.lat),
+            c=75 + 32.74 / 55 * abs(self.lat),
+            d=75 + 48.1 / 55 * abs(self.lat)
+        )
+
+    def computeMoonsightingDotComIshaAdjustment(self):
+        if self.settings["shafaq"] == "ahmer":
+            return self.computeMoonsightingDotComAdjustment(
+                a = 62 + 17.4 / 55.0 * abs(self.lat),
+                b = 62 - 7.16 / 55.0 * abs(self.lat),
+                c = 62 + 5.12 / 55.0 * abs(self.lat),
+                d = 62 + 19.44 / 55.0 * abs(self.lat),
+            )
+        elif self.settings["shafaq"] == "abyad":
+            return self.computeMoonsightingDotComAdjustment(
+                a = 75 + 25.6 / 55.0 * abs(self.lat),
+                b = 75 + 7.16 / 55.0 * abs(self.lat),
+                c = 75 + 36.84 / 55.0 * abs(self.lat),
+                d = 75 + 81.84 / 55.0 * abs(self.lat),
+            )
+        else:
+            return self.computeMoonsightingDotComAdjustment(
+                a = 75 + 25.6 / 55.0 * abs(self.lat),
+                c = 75 - 9.21 / 55.0 * abs(self.lat),
+                b = 75 + 2.05 / 55.0 * abs(self.lat),
+                d = 75 + 6.14 / 55.0 * abs(self.lat),
+            )
+
+
     # compute prayer times
     def computeTimes(self):
         times = {
@@ -289,11 +304,24 @@ class PrayTimes():
         for i in range(self.numIterations):
             times = self.computePrayerTimes(times)
         times = self.adjustTimes(times)
-        # add midnight time
+        # add night times
         if self.settings['midnight'] == 'Jafari':
-            times['midnight'] = times['sunset'] + self.timeDiff(times['sunset'], times['fajr']) / 2
+            diff = self.timeDiff(times['sunset'], times['fajr'])
         else:
-            times['midnight'] = times['sunset'] + self.timeDiff(times['sunset'], times['sunrise']) / 2
+            diff = self.timeDiff(times['sunset'], times['sunrise'])
+        times['firstthird'] = times['sunset'] + diff / 3
+        times['midnight'] = times['sunset'] + diff / 2
+        times['lastthird'] = times['sunset'] + 2 * (diff / 3)
+
+        # https://github.com/islamic-network/prayer-times/blob/f7ed3a2467fbced252a0914c8b202c8b61ca58b9/src/PrayerTimes/PrayerTimes.php#L280
+        if "shafaq" in self.settings:
+            times["fajr"] = times["sunrise"] - self.computeMoonsightingDotComFajrAdjustment() / 60
+
+            if self.isMin(self.settings['imsak']):
+                times['imsak'] = times['fajr'] - self.eval(self.settings['imsak']) / 60.0
+
+            times["isha"] = times["sunset"] + self.computeMoonsightingDotComIshaAdjustment() / 60
+
 
         times = self.tuneTimes(times)
         return self.modifyFormats(times)
@@ -310,13 +338,14 @@ class PrayTimes():
 
         if self.isMin(params['imsak']):
             times['imsak'] = times['fajr'] - self.eval(params['imsak']) / 60.0
-        # need to ask about 'min' settings
+
         if self.isMin(params['maghrib']):
-            times['maghrib'] = times['sunset'] - self.eval(params['maghrib']) / 60.0
+            times['maghrib'] = times['sunset'] + self.eval(params['maghrib']) / 60.0
 
         if self.isMin(params['isha']):
-            times['isha'] = times['maghrib'] - self.eval(params['isha']) / 60.0
+            times['isha'] = times['maghrib'] + self.eval(params['isha']) / 60.0
         times['dhuhr'] += self.eval(params['dhuhr']) / 60.0
+
 
         return times
 
@@ -414,19 +443,3 @@ class PrayTimes():
             return a
         a = a - mode * (math.floor(a / mode))
         return a + mode if a < 0 else a
-
-
-#---------------------- prayTimes Object -----------------------
-
-prayTimes = PrayTimes()
-
-
-#-------------------------- Test Code --------------------------
-
-# sample code to run in standalone mode only
-if __name__ == "__main__":
-    from datetime import date
-    print('Prayer Times for today in Waterloo/Canada\n'+ ('='* 41))
-    times = prayTimes.getTimes(date.today(), (43, -80), -5);
-    for i in ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha', 'Midnight']:
-        print(i+ ': '+ times[i.lower()])
