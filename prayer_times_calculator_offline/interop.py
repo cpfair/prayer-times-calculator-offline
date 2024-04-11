@@ -360,7 +360,6 @@ class PrayerTimesCalculator:
 
         for k, v in times_float.items():
             ts = datetime.combine(self._date, time()) + timedelta(hours=v)
-            print(k, v, ts, times_float[k])
 
             # Rounding
             ts = (ts + timedelta(seconds=30) - timedelta.resolution).replace(
