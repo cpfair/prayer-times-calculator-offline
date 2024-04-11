@@ -12,7 +12,7 @@ Equivalence to the `prayer-times-calculator` library was checked by emperical co
 * Local time output (`iso8601=False`) is not supported, as it is not required for use in HomeAssistant (which deals only with UTC internally)
 * 'None' is supported as a high-latitude adjustment method
 * Angles of 0 are supported for the "custom" calculation method; at time of writing, AlAdhan's API silently ignores such angles and uses a different default angle in their place.
-* Floating point computations take place on your CPU, which may vary from the AlAdhan API server's CPU; there may be 1-minute differences if these computational variations span a rounding break. Hijri date calculation may also be affected, including the 30-minute Isha offset during Ramadan when using the Makkah calculation method.
+* Floating point & trig operations take place on your machine, and may vary slightly from the AlAdhan API server's implementations; there may be 1-minute differences if these computational variations span a rounding break. Hijri date calculation may also be affected, including the 30-minute Isha offset during Ramadan when using the Makkah calculation method.
 
 
 ## Usage
